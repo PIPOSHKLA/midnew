@@ -114,7 +114,8 @@ def compute_sna_metrics(G):
         for comp in nx.connected_components(G):
             btwn.update(nx.betweenness_centrality(G.subgraph(comp)))
     pr = nx.pagerank(G, alpha=0.85, weight='weight_abs')
-    bottom, top = nx.bipartite.sets(G)
+    bottom = [n for n, d in G.nodes(data=True) if d.get('bipartite') == 0]
+    top = [n for n, d in G.nodes(data=True) if d.get('bipartite') == 1]
     return deg, close, btwn, pr, bottom, top
 
 def make_figure(G, pivot, stock_prices, deg, close, btwn, pr, bottom, top, threshold):
@@ -288,7 +289,8 @@ def save_to_word(fig, ts_fig, pivot, G, deg, btwn, pr, threshold, edges, out_pat
     net_density = nx.density(G)
     n_nodes = G.number_of_nodes()
     n_edges = G.number_of_edges()
-    bottom, top = nx.bipartite.sets(G)
+    bottom = [n for n, d in G.nodes(data=True) if d.get('bipartite') == 0]
+    top = [n for n, d in G.nodes(data=True) if d.get('bipartite') == 1]
     p = doc.add_paragraph()
     p.paragraph_format.line_spacing = 1.0
     r = p.add_run(

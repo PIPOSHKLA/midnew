@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Streamlit SNA Dashboard + Word export"""
-import subprocess, sys, os, warnings, io, csv, urllib.request, datetime
+import subprocess, sys, os, warnings, io, csv, json, urllib.request, datetime
 warnings.filterwarnings('ignore')
 for pkg in ['streamlit', 'python-docx', 'networkx', 'matplotlib', 'pandas', 'numpy', 'scipy', 'yfinance']:
     try:
@@ -30,9 +30,28 @@ st.title("Bipartite Tourism-Stock Dependency Network")
 st.markdown("SNA Dashboard — DDAS7201 Midterm Project")
 
 # --- Helper functions ---
+ASEAN = {'BRUNEI','CAMBODIA','CAMBODIA','INDONESIA','LAOS','MALAYSIA','MYANMAR','PHILIPPINES','SINGAPORE','THAILAND','VIETNAM','TIMOR-LESTE','VIET NAM','PHILIPPINES'}
+EUROPE_NAMES = {'ALBANIA','ANDORRA','ARMENIA','AUSTRIA','AZERBAIJAN','BELARUS','BELGIUM','BOSNIA-HERZEGOVINA',
+    'BULGARIA','CROATIA','CYPRUS','CZECH REPUBLIC','DENMARK','ESTONIA','FINLAND','FRANCE','GEORGIA',
+    'GERMANY','GREECE','HUNGARY','ICELAND','IRELAND','ITALY','KAZAKHSTAN','KOSOVO','LATVIA','LIECHTENSTEIN',
+    'LITHUANIA','LUXEMBOURG','MALTA','MOLDOVA','MONACO','MONTENEGRO','NETHERLANDS','NORTH MACEDONIA',
+    'NORWAY','POLAND','PORTUGAL','ROMANIA','RUSSIA','SAN MARINO','SERBIA','SLOVAKIA','SLOVENIA','SPAIN',
+    'SWEDEN','SWITZERLAND','TURKEY','UKRAINE','UNITED KINGDOM','VATICAN'}
+
+def classify_country(country, continent=None):
+    c = country.strip().upper()
+    if 'CHINA' in c or 'HONG KONG' in c or 'TAIWAN' in c or 'MACAO' in c:
+        return 'China'
+    if 'INDIA' in c:
+        return 'India'
+    if continent == 'Europe' or c in EUROPE_NAMES:
+        return 'Europe'
+    if c in ASEAN:
+        return 'ASEAN'
+    return None
+
 @st.cache_data
 def load_data():
-    ASEAN = {'BRUNEI','CAMBODIA','INDONESIA','LAOS','MALAYSIA','MYANMAR','PHILIPPINES','SINGAPORE','THAILAND','VIETNAM','TIMOR-LESTE','VIET NAM'}
     url = ("https://ckan.mots.go.th/dataset/445c66d8-a06a-49d9-adfc-35faca6fc785/"
            "resource/faffc63c-9507-451a-80b7-554cc0787368/download/est_2024_04_01.csv")
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -41,27 +60,31 @@ def load_data():
     reader = csv.DictReader(io.StringIO(content))
     records = []
     for row in reader:
-        country = row['Country'].strip().upper()
-        continent = row['continent'].strip()
-        if 'CHINA' in country or 'HONG KONG' in country or 'TAIWAN' in country or 'MACAO' in country:
-            mkt = 'China'
-        elif 'INDIA' in country:
-            mkt = 'India'
-        elif continent == 'Europe':
-            mkt = 'Europe'
-        elif country in ASEAN:
-            mkt = 'ASEAN'
-        else:
-            continue
-        try:
-            num = int(row[' Number '].replace(',', '').strip())
-        except:
-            continue
+        mkt = classify_country(row['Country'], row['continent'].strip())
+        if mkt is None: continue
+        try: num = int(row[' Number '].replace(',', '').strip())
+        except: continue
         parts = row['date'].strip().split('/')
         if len(parts) == 3:
             d, m, y = int(parts[0]), int(parts[1]), int(parts[2])
-            dt = datetime.date(y, m, d)
-            records.append({'date': dt, 'market': mkt, 'arrivals': num})
+            records.append({'date': datetime.date(y, m, d), 'market': mkt, 'arrivals': num})
+    # Fetch 2024-2025 from TIC3 API
+    for year in [2024, 2025]:
+        max_month = 12 if year == 2024 else 3
+        for month in range(1, max_month + 1):
+            api_url = f"https://tic3.mots.go.th/api/data/Trend_InboundTourists?YearInfo={year}&MonthInfo={month}"
+            try:
+                req2 = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
+                resp = urllib.request.urlopen(req2, timeout=30).read()
+                rows = json.loads(resp.decode('utf-8'))
+                if not rows: continue
+                for r in rows:
+                    mkt = classify_country(r.get('CountryName', ''))
+                    if mkt is None: continue
+                    num = r.get('TouristNumber')
+                    if num is None: continue
+                    records.append({'date': datetime.date(year, month, 1), 'market': mkt, 'arrivals': int(num)})
+            except: pass
     df = pd.DataFrame(records)
     df['month_key'] = df['date'].apply(lambda d: datetime.date(d.year, d.month, 1))
     monthly = df.groupby(['market', 'month_key'])['arrivals'].sum().reset_index()
@@ -232,7 +255,7 @@ def make_time_series_figure(pivot):
     fig, ax = plt.subplots(figsize=(12, 5))
     for m in ['China','India','Europe','ASEAN']:
         ax.plot(pivot.index, pivot[m].values / 1e6, color=m_colors[m], linewidth=1.5, label=m)
-    ax.set_title('Monthly Tourist Arrivals by Market (2015-2023)', fontsize=13, fontweight='bold')
+    ax.set_title('Monthly Tourist Arrivals by Market (2015-2025)', fontsize=13, fontweight='bold')
     ax.set_ylabel('Arrivals (millions)')
     ax.set_xlabel('Year')
     ax.legend(fontsize=9, framealpha=0.9)

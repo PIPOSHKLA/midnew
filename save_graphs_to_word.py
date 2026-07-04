@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Standalone: generate SNA graphs + save to Word (no Streamlit needed)"""
-import subprocess, sys, os, warnings, io, csv, urllib.request, datetime, platform
+import subprocess, sys, os, warnings, io, csv, json, urllib.request, datetime, platform
 warnings.filterwarnings('ignore')
 for pkg in ['python-docx','networkx','matplotlib','pandas','numpy','scipy','yfinance']:
     try:
@@ -24,31 +24,53 @@ from docx.oxml.ns import qn
 import yfinance as yf
 
 print("Loading data...")
-# MOTS
+ASEAN = {'BRUNEI','CAMBODIA','INDONESIA','LAOS','MALAYSIA','MYANMAR','PHILIPPINES','SINGAPORE','THAILAND','VIETNAM','TIMOR-LESTE','VIET NAM'}
+EUROPE_NAMES = {'ALBANIA','ANDORRA','ARMENIA','AUSTRIA','AZERBAIJAN','BELARUS','BELGIUM','BOSNIA-HERZEGOVINA',
+    'BULGARIA','CROATIA','CYPRUS','CZECH REPUBLIC','DENMARK','ESTONIA','FINLAND','FRANCE','GEORGIA',
+    'GERMANY','GREECE','HUNGARY','ICELAND','IRELAND','ITALY','KAZAKHSTAN','KOSOVO','LATVIA','LIECHTENSTEIN',
+    'LITHUANIA','LUXEMBOURG','MALTA','MOLDOVA','MONACO','MONTENEGRO','NETHERLANDS','NORTH MACEDONIA',
+    'NORWAY','POLAND','PORTUGAL','ROMANIA','RUSSIA','SAN MARINO','SERBIA','SLOVAKIA','SLOVENIA','SPAIN',
+    'SWEDEN','SWITZERLAND','TURKEY','UKRAINE','UNITED KINGDOM','VATICAN'}
+def classify(c, continent=None):
+    cu = c.strip().upper()
+    if 'CHINA' in cu or 'HONG KONG' in cu or 'TAIWAN' in cu or 'MACAO' in cu: return 'China'
+    if 'INDIA' in cu: return 'India'
+    if (continent and continent == 'Europe') or cu in EUROPE_NAMES: return 'Europe'
+    if cu in ASEAN: return 'ASEAN'
+    return None
+# MOTS CSV (2015-2023)
 url = ("https://ckan.mots.go.th/dataset/445c66d8-a06a-49d9-adfc-35faca6fc785/"
        "resource/faffc63c-9507-451a-80b7-554cc0787368/download/est_2024_04_01.csv")
 req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
 raw = urllib.request.urlopen(req, timeout=60).read()
 content = raw.decode('utf-8-sig')
-reader = csv.DictReader(io.StringIO(content))
-rows = list(reader)
-ASEAN = {'BRUNEI','CAMBODIA','INDONESIA','LAOS','MALAYSIA','MYANMAR','PHILIPPINES','SINGAPORE','THAILAND','VIETNAM','TIMOR-LESTE','VIET NAM'}
 records = []
-for row in rows:
-    country = row['Country'].strip().upper()
-    continent = row['continent'].strip()
-    if 'CHINA' in country or 'HONG KONG' in country or 'TAIWAN' in country or 'MACAO' in country:
-        mkt = 'China'
-    elif 'INDIA' in country: mkt = 'India'
-    elif continent == 'Europe': mkt = 'Europe'
-    elif country in ASEAN: mkt = 'ASEAN'
-    else: continue
+for row in csv.DictReader(io.StringIO(content)):
+    mkt = classify(row['Country'], row['continent'].strip())
+    if mkt is None: continue
     try: num = int(row[' Number '].replace(',', '').strip())
     except: continue
     parts = row['date'].strip().split('/')
     if len(parts) == 3:
         d, m, y = int(parts[0]), int(parts[1]), int(parts[2])
         records.append({'date': datetime.date(y, m, d), 'market': mkt, 'arrivals': num})
+# TIC3 API (2024-2025)
+for year in [2024, 2025]:
+    max_month = 12 if year == 2024 else 3
+    for month in range(1, max_month + 1):
+        api_url = f"https://tic3.mots.go.th/api/data/Trend_InboundTourists?YearInfo={year}&MonthInfo={month}"
+        try:
+            req2 = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
+            resp = urllib.request.urlopen(req2, timeout=30).read()
+            rows = json.loads(resp.decode('utf-8'))
+            if not rows: continue
+            for r in rows:
+                mkt = classify(r.get('CountryName', ''))
+                if mkt is None: continue
+                num = r.get('TouristNumber')
+                if num is None: continue
+                records.append({'date': datetime.date(year, month, 1), 'market': mkt, 'arrivals': int(num)})
+        except: pass
 df = pd.DataFrame(records)
 df['month_key'] = df['date'].apply(lambda d: datetime.date(d.year, d.month, 1))
 monthly = df.groupby(['market', 'month_key'])['arrivals'].sum().reset_index()
@@ -180,7 +202,7 @@ fig2, ax2 = plt.subplots(figsize=(12, 5))
 ts_colors = {'China':'#E8630A','India':'#F4A261','Europe':'#D62828','ASEAN':'#E9C46A'}
 for m in market_names:
     ax2.plot(pivot.index, pivot[m].values/1e6, color=ts_colors[m], linewidth=1.5, label=m)
-ax2.set_title('Monthly Tourist Arrivals (2015-2023)', fontsize=13, fontweight='bold')
+ax2.set_title('Monthly Tourist Arrivals (2015-2025)', fontsize=13, fontweight='bold')
 ax2.set_ylabel('Arrivals (millions)'); ax2.set_xlabel('Year')
 ax2.legend(fontsize=9); ax2.xaxis.set_major_locator(mdates.YearLocator(2))
 ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))

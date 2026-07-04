@@ -6,7 +6,7 @@ Midterm Project v2: Real data from MOTS (CKAN) and SET (Yahoo Finance)
 """
 
 # ============ STAGE 1: Environment Setup ============
-import subprocess, sys, os, warnings, platform, pathlib, io, csv, urllib.request, datetime
+import subprocess, sys, os, warnings, platform, pathlib, io, csv, json, urllib.request, datetime
 warnings.filterwarnings('ignore')
 
 _REQUIRED = ['python-docx', 'networkx', 'matplotlib', 'pandas', 'numpy', 'scipy', 'yfinance']
@@ -35,7 +35,7 @@ import yfinance as yf
 
 print("=" * 60)
 print("DDAS7201 - Social Network Analysis Midterm Project v2")
-print("10-Year Real Data: MOTS + Yahoo Finance")
+print("Real Data 2015-2025: MOTS + TIC3 API + Yahoo Finance")
 print("=" * 60)
 
 system = platform.system()
@@ -117,6 +117,52 @@ for col in pivot.columns:
     en = market_en.get(col, col)
     print(f"    {en}: total={pivot[col].sum():,.0f}, mean={pivot[col].mean():,.0f}")
 print(f"  GRAND TOTAL across all markets: {pivot.sum().sum():,.0f}")
+
+# Fetch 2024-2025 data from TIC3 API
+print("\n[STAGE 2b] Fetching 2024-2025 data from TIC3 API...")
+EUROPE_NAMES = {'ALBANIA','ANDORRA','ARMENIA','AUSTRIA','AZERBAIJAN','BELARUS','BELGIUM','BOSNIA-HERZEGOVINA',
+    'BULGARIA','CROATIA','CYPRUS','CZECH REPUBLIC','DENMARK','ESTONIA','FINLAND','FRANCE','GEORGIA',
+    'GERMANY','GREECE','HUNGARY','ICELAND','IRELAND','ITALY','KAZAKHSTAN','KOSOVO','LATVIA','LIECHTENSTEIN',
+    'LITHUANIA','LUXEMBOURG','MALTA','MOLDOVA','MONACO','MONTENEGRO','NETHERLANDS','NORTH MACEDONIA',
+    'NORWAY','POLAND','PORTUGAL','ROMANIA','RUSSIA','SAN MARINO','SERBIA','SLOVAKIA','SLOVENIA','SPAIN',
+    'SWEDEN','SWITZERLAND','TURKEY','UKRAINE','UNITED KINGDOM','VATICAN'}
+def classify_api(country):
+    cu = country.strip().upper()
+    if 'CHINA' in cu or 'HONG KONG' in cu or 'TAIWAN' in cu or 'MACAO' in cu: return 'จีน'
+    if 'INDIA' in cu: return 'อินเดีย'
+    if cu in EUROPE_NAMES: return 'ยุโรป'
+    if cu in ASEAN_COUNTRIES: return 'อาเซียน'
+    return None
+new_records = []
+for year in [2024, 2025]:
+    max_month = 12 if year == 2024 else 3
+    for month in range(1, max_month + 1):
+        api_url = f"https://tic3.mots.go.th/api/data/Trend_InboundTourists?YearInfo={year}&MonthInfo={month}"
+        try:
+            req2 = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
+            resp = urllib.request.urlopen(req2, timeout=30).read()
+            rows = json.loads(resp.decode('utf-8'))
+            if not rows: continue
+            for r in rows:
+                mkt = classify_api(r.get('CountryName', ''))
+                if mkt is None: continue
+                num = r.get('TouristNumber')
+                if num is None: continue
+                new_records.append({'date': datetime.date(year, month, 1), 'market': mkt, 'arrivals': int(num)})
+        except Exception as e:
+            print(f"  Warning: {year}-{month:02d}: {e}")
+if new_records:
+    df2 = pd.DataFrame(new_records)
+    df2['month_key'] = df2['date'].apply(lambda d: datetime.date(d.year, d.month, 1))
+    month2 = df2.groupby(['market', 'month_key'])['arrivals'].sum().reset_index()
+    pivot2 = month2.pivot_table(index='month_key', columns='market', values='arrivals', aggfunc='sum').fillna(0).sort_index()
+    pivot2.index = pd.to_datetime(pivot2.index)
+    for m in ['จีน', 'อินเดีย', 'ยุโรป', 'อาเซียน']:
+        if m not in pivot2.columns: pivot2[m] = 0.0
+    # Combine CSV + API data
+    pivot = pd.concat([pivot, pivot2]).sort_index()
+    pivot = pivot[~pivot.index.duplicated(keep='first')]
+    print(f"  Extended to: {pivot.index[0].date()} to {pivot.index[-1].date()} ({len(pivot)} months)")
 
 # ============ STAGE 3: Download Stock Data from Yahoo Finance ============
 print("\n[STAGE 3] Downloading 10-year SET stock data from Yahoo Finance...")

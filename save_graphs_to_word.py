@@ -93,7 +93,8 @@ if not btwn:
     for comp in nx.connected_components(G):
         btwn.update(nx.betweenness_centrality(G.subgraph(comp)))
 pr = nx.pagerank(G, alpha=0.85, weight='weight_abs')
-bottom, top = nx.bipartite.sets(G)
+bottom = [n for n, d in G.nodes(data=True) if d.get('bipartite') == 0]
+top = [n for n, d in G.nodes(data=True) if d.get('bipartite') == 1]
 net_density = nx.density(G)
 
 # Font

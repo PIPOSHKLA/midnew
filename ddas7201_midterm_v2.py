@@ -203,7 +203,8 @@ components = list(nx.connected_components(G))
 n_components = len(components)
 largest_comp = max(components, key=len) if components else set()
 
-bottom, top = nx.bipartite.sets(G)
+bottom = [n for n, d in G.nodes(data=True) if d.get('bipartite') == 0]
+top = [n for n, d in G.nodes(data=True) if d.get('bipartite') == 1]
 n_markets = len(bottom)
 n_stocks = len(top)
 

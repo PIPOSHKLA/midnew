@@ -104,7 +104,7 @@ def load_stocks(pivot):
         df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
         mc = df['Close'].resample('ME').last()
         mc.index = mc.index.tz_localize(None)
-        aligned = mc.reindex(pivot.index, method='ffill')
+        aligned = mc.reindex(pivot.index, method='ffill').bfill()
         stock_prices[label] = aligned.values
     return stock_prices
 
